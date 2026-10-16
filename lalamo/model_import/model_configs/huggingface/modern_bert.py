@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from lalamo.modules.activations import GELU
@@ -26,31 +26,34 @@ __all__ = ["ModernBERTConfig"]
 
 
 @dataclass(frozen=True)
+class ModernBERTRoPEParameters:
+    rope_theta: float
+    rope_type: Literal["default"] = "default"
+
+
+@dataclass(frozen=True)
 class ModernBERTConfig(HuggingFaceClassifierConfig):
-    architectures: list[Literal["ModernBertForSequenceClassification"]]
+    architectures: list[Literal["ModernBertForSequenceClassification", "ModernBertForMaskedLM"]]
     attention_bias: bool
     attention_dropout: float
     bos_token_id: int | list[int]
     classifier_activation: Literal["gelu"]
     classifier_bias: bool
     classifier_dropout: float
-    classifier_pooling: Literal["mean"]
+    classifier_pooling: Literal["mean", "cls"]
     cls_token_id: int | list[int]
     decoder_bias: bool
     deterministic_flash_attn: bool
     embedding_dropout: float
     eos_token_id: int | list[int]
     global_attn_every_n_layers: int
-    global_rope_theta: float
     gradient_checkpointing: bool
     hidden_activation: Literal["gelu"]
     hidden_size: int
     initializer_cutoff_factor: float
     initializer_range: float
     intermediate_size: int
-    layer_norm_eps: float
     local_attention: int
-    local_rope_theta: float
     max_position_embeddings: int
     mlp_bias: bool
     mlp_dropout: float
@@ -60,12 +63,17 @@ class ModernBERTConfig(HuggingFaceClassifierConfig):
     num_attention_heads: int
     num_hidden_layers: int
     pad_token_id: int | list[int]
-    position_embedding_type: Literal["absolute"]
     sep_token_id: int | list[int]
     transformers_version: str
     vocab_size: int
-    id2label: dict[int, str]
-    label2id: dict[str, int]
+    layer_norm_eps: float = 1e-5
+    position_embedding_type: Literal["absolute", "sans_pos"] = "absolute"
+    global_rope_theta: float = 160000.0
+    local_rope_theta: float = 10000.0
+    id2label: dict[int, str] = field(default_factory=dict)
+    label2id: dict[str, int] = field(default_factory=dict)
+    rope_parameters: dict[str, ModernBERTRoPEParameters] = field(default_factory=dict)
+    layer_types: tuple[Literal["full_attention", "sliding_attention"], ...] | None = None
 
     quantization_config: AWQQuantizationConfig | GPTQQuantizationConfig | None = None
 
@@ -92,15 +100,20 @@ class ModernBERTConfig(HuggingFaceClassifierConfig):
             scale_offset=None,
             upcast_mode=UpcastMode.ONLY_NORMALIZATION,
             subtract_mean=True,
+            has_biases=self.norm_bias,
         )
 
         global_rope_config = UnscaledRoPEConfig(
-            base=self.global_rope_theta,
+            base=self.rope_parameters.get(
+                "full_attention", ModernBERTRoPEParameters(self.global_rope_theta)
+            ).rope_theta,
             max_sequence_length=self.max_position_embeddings,
             head_dim=head_dim,
         )
         local_rope_config = UnscaledRoPEConfig(
-            base=self.local_rope_theta,
+            base=self.rope_parameters.get(
+                "sliding_attention", ModernBERTRoPEParameters(self.local_rope_theta)
+            ).rope_theta,
             max_sequence_length=self.max_position_embeddings,
             head_dim=head_dim,
         )
@@ -112,6 +125,7 @@ class ModernBERTConfig(HuggingFaceClassifierConfig):
             scale_offset=None,
             upcast_mode=UpcastMode.ONLY_NORMALIZATION,
             subtract_mean=True,
+            has_biases=self.norm_bias,
         )
         linear_config = LinearConfig()
         activation = GELU(approximate=False)

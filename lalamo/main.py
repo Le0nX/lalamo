@@ -110,6 +110,57 @@ def _error(message: str) -> None:
     raise Exit(1)
 
 
+@app.command(help="Convert a local Julia/Laya marker decision checkpoint for UZU.")
+def convert_decision(
+    checkpoint: Annotated[Path, Argument(help="Local Julia/Laya checkpoint directory.")],
+    output: Annotated[Path, Argument(help="Empty output directory.")],
+    dtype: Annotated[DType, Option(help="Export weight precision.")] = DType.BFLOAT16,
+) -> None:
+    from lalamo.model_import.decision import export_decision_model  # noqa: PLC0415
+
+    export_decision_model(checkpoint, output, dtype=jax.numpy.dtype(dtype.value))
+    console.print(f"Decision model exported to {output}")
+
+
+@app.command(help="Merge a local Nimble v3 LoRA into its pinned Qwen3.5-9B base and export for UZU.")
+def convert_nimble(
+    base: Annotated[Path, Argument(help="Original pinned BF16 Qwen3.5-9B checkpoint.")],
+    adapter: Annotated[Path, Argument(help="Bespoke-Nimble-9B-v3 adapter snapshot.")],
+    prompt_sources: Annotated[
+        Path, Argument(help="Pinned Nimble evaluation directory with both schema source files.")
+    ],
+    output: Annotated[Path, Argument(help="New output directory.")],
+) -> None:
+    from lalamo.model_import.nimble import merge_and_export_nimble  # noqa: PLC0415
+
+    merge_and_export_nimble(base, adapter, prompt_sources, output)
+    console.print(f"Nimble model exported to {output}; native/merged/UZU parity must be evaluated separately.")
+
+
+@app.command(help="Export a pinned native d3, d3-mini or d3-flash code-readout checkpoint for UZU.")
+def convert_d3(
+    checkpoint: Annotated[Path, Argument(help="Pinned native vllm-sr/d3, d3-mini or d3-flash directory.")],
+    output: Annotated[Path, Argument(help="New output directory.")],
+    revision: Annotated[str, Option(help="Exact model revision to record in provenance.")],
+) -> None:
+    from lalamo.model_import.d3 import export_d3  # noqa: PLC0415
+
+    export_d3(checkpoint, output, revision=revision)
+    console.print(f"d3 model exported to {output}; native/UZU parity must be evaluated separately.")
+
+
+@app.command(help="Export a pinned Perplexity Decider v1.1 27B checkpoint for UZU.")
+def convert_perplexity(
+    checkpoint: Annotated[Path, Argument(help="Pinned native pplx-decider-v1.1-27b directory.")],
+    output: Annotated[Path, Argument(help="New output directory.")],
+    revision: Annotated[str, Option(help="Exact model revision to record in provenance.")],
+) -> None:
+    from lalamo.model_import.perplexity import export_perplexity  # noqa: PLC0415
+
+    export_perplexity(checkpoint, output, revision=revision)
+    console.print(f"Perplexity model exported to {output}; native/UZU parity must be evaluated separately.")
+
+
 @app.command(help="Chat with a converted model.")
 def chat(
     model_path: Annotated[

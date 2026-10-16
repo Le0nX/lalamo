@@ -114,6 +114,8 @@ class AttentionConfig(TokenMixerConfig):
     # Scale-free RMS normalization on values
     normalize_values: bool = False
     is_kv_sharing: bool = False
+    # Explicit HF eager BF16 rounding for stateless typed marker encoders.
+    bf16_eager: bool = False
 
     def init(
         self,
@@ -267,6 +269,8 @@ class Attention(TokenMixerBase[AttentionConfig, KVCacheLayer]):
         *,
         keychain: Keychain,
     ) -> AttentionResult:
+        if self.config.bf16_eager and inputs.dtype == jnp.bfloat16:
+            raise NotImplementedError("Pinned PyTorch eager BF16 compatibility is implemented in uzu, not the lalamo reference forward")
         qkvg_keychain, out_keychain = keychain.split(2)
         assert reuse_cache == self.config.is_kv_sharing, "reuse_cache must match AttentionConfig.is_kv_sharing"
         projections = call_vmapped(

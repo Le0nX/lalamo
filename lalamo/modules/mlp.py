@@ -34,6 +34,8 @@ from .utils import call_vmapped, call_vmapped_twice
 __all__ = [
     "DenseMLP",
     "DenseMLPConfig",
+    "FeedForwardMLP",
+    "FeedForwardMLPConfig",
     "MLPBase",
     "MLPConfig",
     "MLPForwardPassConfig",
@@ -796,3 +798,67 @@ class MixtureOfExperts(MLPBase[MixtureOfExpertsConfig]):
             "(batch suffix_tokens) channels -> batch suffix_tokens channels",
             batch=batch_size,
         )
+
+
+@dataclass(frozen=True)
+class FeedForwardMLPConfig(MLPConfig):
+    linear_config: LinearConfig
+    activation: Activation
+    has_up_biases: bool
+    has_down_biases: bool
+
+    def init(self, initializer: Initializer, model_dim: int, hidden_dim: int) -> "FeedForwardMLP":
+        return FeedForwardMLP(
+            config=self,
+            sharding_config=initializer.sharding_config,
+            up_projection=self.linear_config.init(initializer, model_dim, (hidden_dim,), self.has_up_biases),
+            down_projection=self.linear_config.init(initializer, hidden_dim, (model_dim,), self.has_down_biases),
+        )
+
+
+class FeedForwardMLP(MLPBase[FeedForwardMLPConfig]):
+    up_projection: Linear
+    down_projection: Linear
+
+    @property
+    def model_dim(self) -> int:
+        return self.up_projection.input_dim
+
+    @property
+    def hidden_dim(self) -> int:
+        return self.down_projection.input_dim
+
+    @eqx.filter_jit
+    def __call__(
+        self,
+        inputs: Float[Array, "batch suffix_tokens channels"],
+        lengths_without_padding: Int[Array, " batch"] | None = None,  # noqa: ARG002
+        forward_pass_config: MLPForwardPassConfig = MLPForwardPassConfig(),
+        *,
+        keychain: Keychain,
+    ) -> Float[Array, "batch suffix_tokens channels"]:
+        return call_vmapped_twice(
+            self.call_unbatched,
+            inputs,
+            forward_pass_config=forward_pass_config,
+            keychain=keychain,
+            added_sharding_axes=(self.sharding_config.resolve_axis(LogicalAxis.BATCH), None),
+        )
+
+    def call_unbatched(
+        self,
+        inputs: Float[Array, " channels"],
+        forward_pass_config: MLPForwardPassConfig,
+        *,
+        keychain: Keychain,
+    ) -> Float[Array, " channels"]:
+        up_keychain, down_keychain = keychain.split()
+        (hidden,) = self.up_projection(
+            inputs, keychain=up_keychain, forward_pass_config=forward_pass_config.matmul_config
+        )
+        (outputs,) = self.down_projection(
+            self.config.activation(hidden),
+            keychain=down_keychain,
+            forward_pass_config=forward_pass_config.matmul_config,
+        )
+        return outputs

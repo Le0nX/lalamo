@@ -11,6 +11,7 @@ __all__ = [
     "GELU",
     "Activation",
     "Identity",
+    "ReLU",
     "SiLU",
 ]
 
@@ -32,8 +33,12 @@ class SiLU(Activation):
 @dataclass(frozen=True)
 class GELU(Activation):
     approximate: bool = True
+    # uzu's optional pinned PyTorch CPU BF16 compatibility operator.
+    pytorch_bf16: bool = False
 
     def __call__(self, x: Float[Array, "..."]) -> Float[Array, "..."]:
+        if self.pytorch_bf16 and x.dtype == jax.numpy.bfloat16:
+            raise NotImplementedError("Pinned PyTorch BF16 GELU compatibility runs in uzu; lalamo reference forward supports F32")
         return jax.nn.gelu(x, approximate=self.approximate)
 
 
@@ -41,3 +46,9 @@ class GELU(Activation):
 class Identity(Activation):
     def __call__(self, x: Float[Array, "..."]) -> Float[Array, "..."]:
         return x
+
+
+@dataclass(frozen=True)
+class ReLU(Activation):
+    def __call__(self, x: Float[Array, "..."]) -> Float[Array, "..."]:
+        return jax.nn.relu(x)
